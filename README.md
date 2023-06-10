@@ -1,0 +1,1 @@
+# Esses arquivos foram usados para escrever um artigo no qual o objetivo foi encontrar determinanter macroeconomicos para diversos fundos de investimentos. Foi usado Um modelo ARDL para testar cointegração a partir do teste de limite e em seguida foi implementado um teste de Toda e Yamamoto.
