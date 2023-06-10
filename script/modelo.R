@@ -60,7 +60,7 @@ ima.geral <- read_csv("dados/IMA-GERAL.csv") %>%
 
 # JUNTANDO TUDO EM UM DATA FRAME
 
-merged_variable <- list(ihfa, ibov, ima.geral, cds_5y, ibc.br, cambio) %>% 
+merged_variable <- list(ibov, ima.geral, cds_5y, ibc.br, cambio) %>% 
   reduce(full_join, by = "date") %>%  # Combinação das variáveis pela coluna "date"
   arrange(date) %>%  # Classificação do data frame combinado em ordem crescente pela coluna "date"
   na.omit() %>%  # Remoção de linhas com valores ausentes (NA)
@@ -339,10 +339,17 @@ getting_the_good_funds <- function(all_funds, cointegrated_funds){
     # Seleciona apenas os primeiros 10 fundos
     slice(1:10) %>% 
     # Seleciona as colunas cnpj, nome e pvalue
-    select(cnpj, nome, pvalue)
+    select(cnpj)
+  
+  x <- cointegrated_funds |> 
+    filter(cnpj %in% funds_will_be_used$cnpj) |>
+    # Realiza um left join entre os fundos cointegrados e os nomes dos fundos
+    left_join(funds_name, by = "cnpj") |> 
+    # Filtra os fundos cujos nomes não contêm a palavra "PRIVADO"
+    filter(!str_detect(nome, "PRIVADO"))
   
   # Retorna os fundos que serão utilizados
-  return(funds_will_be_used)
+  return(x)
 }
 
 
@@ -369,10 +376,10 @@ cointegrated_funds <- filter_bound_test_result(bound_test_result)
 cnpj_good_funds <- getting_the_good_funds(funds_var_merged, cointegrated_funds)
 
 # Lista de nomes de fundos a serem alterados
-names_to_change <- c("vokin_everest", "jgp_strategy", "opportunity_total", "dahlia_total", "spx_nimitz")
+names_to_change <- c("verde", "opportunity_total",  "spx_nimitz", "jgp_strategy", "kapitalo_master")
 
 # Filtrando e renomeando os fundos selecionados
-cnpj_good_funds <- cnpj_good_funds[c(3, 6, 7, 9, 10), ] %>% 
+cnpj_good_funds <- cnpj_good_funds[c(2, 3, 5, 9, 4), ] %>% 
   cbind(names_to_change) %>% 
   select(-nome) %>% 
   rename(nome = names_to_change)
@@ -481,7 +488,7 @@ toda_yamamoto <- function(funds_list, ic) {
     )
     
     # Loop através das colunas do fundo atual
-    for (j in 2:(ncol(funds_list[[i]]) - 1)) {
+    for (j in 2:(ncol(funds_list[[i]]))) {
       
       # Seleciona as colunas relevantes do fundo atual para o modelo VAR
       var_selec <- funds_list[[i]][, c(1, j)] %>%
@@ -493,78 +500,40 @@ toda_yamamoto <- function(funds_list, ic) {
       
       # Ajusta o modelo VAR para as colunas selecionadas
       var_model <- funds_list[[i]][, c(1, j)] %>% 
-        VAR(p = var_ic, type = "none")
+        VAR(p = var_ic+1, type = "none")
       
       #### Teste de Wald ####
+        # Teste de Wald para a ida
+        test_result_ida <- wald.test(
+          Sigma = vcov(var_model$varresult[[1]]),
+          b = coef(var_model$varresult[[1]]),
+          Terms = seq(from = 2, to = (var_model$p * 2), by = 2)
+        )
+        
+        # Teste de Wald para a volta
+        test_result_volta <- wald.test(
+          Sigma = vcov(var_model$varresult[[2]]),
+          b = coef(var_model$varresult[[2]]),
+          Terms = seq(1, (var_model$p * 2), 2)
+        )
+        
+        # Adiciona os resultados aos data frames de resultados
+        df_result <- rbind(
+          df_result,
+          data.frame(
+            causa = names(var_model$varresult)[[2]],
+            efeito = names(var_model$varresult)[[1]],
+            qui_quadrado = test_result_ida$result$chi2['chi2'] |> as.numeric() |> round(3),
+            p_valor = test_result_ida$result$chi2['P'] %>% as.numeric() |> round(3)
+          ),
+          data.frame(
+            causa = names(var_model$varresult)[[1]],
+            efeito = names(var_model$varresult)[[2]],
+            qui_quadrado = test_result_volta$result$chi2['chi2'] %>% as.numeric() |> round(3),
+            p_valor = test_result_volta$result$chi2['P'] %>% as.numeric() |> round(3)
+          )
+        )
       
-      if (var_model$p == 1) {
-        # Se p=1, realiza o teste de Wald para o modelo VAR univariado
-        
-        # Teste de Wald para a ida
-        test_result_ida <- wald.test(
-          Sigma = vcov(var_model$varresult[[1]]),
-          b = coef(var_model$varresult[[1]]),
-          Terms = c(2)
-        )
-        
-        # Teste de Wald para a volta
-        test_result_volta <- wald.test(
-          Sigma = vcov(var_model$varresult[[2]]),
-          b = coef(var_model$varresult[[2]]),
-          Terms = c(1)
-        )
-        
-        # Adiciona os resultados aos data frames de resultados
-        df_result <- rbind(
-          df_result,
-          data.frame(
-            causa = names(var_model$varresult)[[1]],
-            efeito = names(var_model$varresult)[[2]],
-            qui_quadrado = test_result_ida$result$chi2['chi2'] |> as.numeric() |> round(4),
-            p_valor = test_result_ida$result$chi2['P'] %>% as.numeric() |> round(4)
-          ),
-          data.frame(
-            causa = names(var_model$varresult)[[2]],
-            efeito = names(var_model$varresult)[[1]],
-            qui_quadrado = test_result_volta$result$chi2['chi2'] %>% as.numeric() |> round(4),
-            p_valor = test_result_volta$result$chi2['P'] %>% as.numeric() |> round(4)
-          )
-        )
-        
-      } else {
-        # Se p>1, realiza o teste de Wald para o modelo VAR multivariado
-        
-        # Teste de Wald para a ida
-        test_result_ida <- wald.test(
-          Sigma = vcov(var_model$varresult[[1]]),
-          b = coef(var_model$varresult[[1]]),
-          Terms = seq(from = 2, to = (var_model$p * 2 - 1), by = 2)
-        )
-        
-        # Teste de Wald para a volta
-        test_result_volta <- wald.test(
-          Sigma = vcov(var_model$varresult[[2]]),
-          b = coef(var_model$varresult[[2]]),
-          Terms = seq(1, (var_model$p * 2 - 2), 2)
-        )
-        
-        # Adiciona os resultados aos data frames de resultados
-        df_result <- rbind(
-          df_result,
-          data.frame(
-            causa = names(var_model$varresult)[[1]],
-            efeito = names(var_model$varresult)[[2]],
-            qui_quadrado = test_result_ida$result$chi2['chi2'] |> as.numeric() |> round(4),
-            p_valor = test_result_ida$result$chi2['P'] %>% as.numeric() |> round(4)
-          ),
-          data.frame(
-            causa = names(var_model$varresult)[[2]],
-            efeito = names(var_model$varresult)[[1]],
-            qui_quadrado = test_result_volta$result$chi2['chi2'] %>% as.numeric() |> round(4),
-            p_valor = test_result_volta$result$chi2['P'] %>% as.numeric() |> round(4)
-          )
-        )
-      }
     }
     
     result[[i]] <- df_result   # Armazena os resultados para o fundo atual na lista de resultados
@@ -585,9 +554,8 @@ toda_yamamoto <- function(funds_list, ic) {
 # Executando a função toda_yamamoto nos fundos selecionados usando o critério de informação "aic"
 ty_result <- set_names(
   toda_yamamoto(goods_funds_list, ic = "aic") %>%
-    map(~filter(.x, efeito == "nav")),
-  c("spx_nimitz", "vokin_everest", "dahlia_total", "opportunity_total", "jgp_strategy")
+    map(~filter(.x, efeito == "nav" & p_valor <=0.1)),
+  cnpj_good_funds$nome
   ) |> 
-  print(ty_result)
-
+  print()
 
